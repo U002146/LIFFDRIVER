@@ -93,11 +93,10 @@
         <a id="sheet-link" href="#" target="_blank" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-table mr-2 text-green-600"></i>開啟報表</a>
         <button onclick="openToolsModal()" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-tools mr-2 text-orange-500"></i>補單 / 刪除</button>
     </div>
-    <div class="mt-8 text-center text-xs text-gray-400">System v23.2 | Fix: Auto-Reload on Delete</div>
+    <div class="mt-8 text-center text-xs text-gray-400">System v23.3 | Fix: Delete Sync Logic</div>
   </div>
 
   <script>
-    // ★★★ 設定區 (請換成您的 GAS 部署網址) ★★★
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwajwJgO5rOEh0KRRYLlJ8XsFS1_EuZQU4vHydQMNDSA3uA_sL-X8ph44crSZeyRjY/exec"; 
     const DRIVER_ID = 'U467348846c6b1fa433990d7b75c935b5'; 
 
@@ -105,7 +104,6 @@
 
     window.onload = function() { initSystem(); };
 
-    // --- 終極修正版 API 呼叫 (全部改用 GET) ---
     async function callApi(action, payload = {}) {
         const params = new URLSearchParams();
         params.append('action', action);
@@ -147,8 +145,8 @@
         state.currentStatus = response.driverStatus || '下班';
         document.getElementById('sheet-link').href = response.spreadsheetUrl;
         
-        // 確保如果有的話就顯示，沒有就隱藏
         if (response.lastCompleted) {
+            document.getElementById('last-record-container').classList.remove('hidden'); // 確保顯示
             updateLastRecordCard(response.lastCompleted);
         } else {
             document.getElementById('last-record-container').classList.add('hidden');
@@ -225,8 +223,14 @@
     }
 
     function handleActionSuccess(res, actionType, reqData) {
-        hideLoading();
-        if (!res.success) { Swal.fire('錯誤', res.error, 'error'); return; }
+        // 注意：除了 delete 之外，其他 action 成功後隱藏 loading
+        if (actionType !== 'delete') hideLoading();
+        
+        if (!res.success) { 
+            hideLoading(); 
+            Swal.fire('錯誤', res.error, 'error'); 
+            return; 
+        }
 
         if (actionType === 'pickup') {
             document.getElementById('current-pickup-loc').innerText = res.pickupAddress;
@@ -244,12 +248,15 @@
             updateStatusBadge('空車');
             Swal.fire({ icon: 'success', title: '行程完成', text: `時間：${res.completedRecord.time}`, timer: 2000, showConfirmButton: false });
         } else if (actionType === 'delete') {
-            setDrivingMode(false);
-            updateStatusBadge('空車');
-            // ★★★ 核心修改：刪除成功後，自動重整 (initSystem) ★★★
-            // 這樣可以強制從後端抓回正確的 row index 和上一筆 lastRecord
-            Swal.fire({ icon: 'success', title: '已刪除', text: '正在重新同步...', timer: 1000, showConfirmButton: false });
-            setTimeout(() => initSystem(), 1000); 
+            // ★★★ 核心修正：刪除成功後，不隱藏卡片，不改動 UI，只負責觸發重整 ★★★
+            // 這裡不呼叫 hideLoading()，讓 Loading 畫面持續到 initSystem 完成
+            // 避免使用者看到畫面閃爍（消失又出現）
+            showLoading('資料更新中...');
+            
+            // 稍微延遲一下讓 GAS 寫入完成 (保險起見)，然後呼叫 initSystem
+            setTimeout(() => {
+                initSystem();
+            }, 500); 
         } else if (actionType === 'manual_insert') {
             Swal.fire('補單成功', '資料已寫入', 'success');
             setTimeout(initSystem, 1000);
