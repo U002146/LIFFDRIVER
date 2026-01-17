@@ -93,7 +93,7 @@
         <a id="sheet-link" href="#" target="_blank" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-table mr-2 text-green-600"></i>開啟報表</a>
         <button onclick="openToolsModal()" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-tools mr-2 text-orange-500"></i>補單 / 刪除</button>
     </div>
-    <div class="mt-8 text-center text-xs text-gray-400">System v23.3 | Fix: Delete Sync Logic</div>
+    <div class="mt-8 text-center text-xs text-gray-400">System v23.4 | Fix: Delete Action Sync</div>
   </div>
 
   <script>
@@ -146,7 +146,7 @@
         document.getElementById('sheet-link').href = response.spreadsheetUrl;
         
         if (response.lastCompleted) {
-            document.getElementById('last-record-container').classList.remove('hidden'); // 確保顯示
+            document.getElementById('last-record-container').classList.remove('hidden'); 
             updateLastRecordCard(response.lastCompleted);
         } else {
             document.getElementById('last-record-container').classList.add('hidden');
@@ -223,7 +223,6 @@
     }
 
     function handleActionSuccess(res, actionType, reqData) {
-        // 注意：除了 delete 之外，其他 action 成功後隱藏 loading
         if (actionType !== 'delete') hideLoading();
         
         if (!res.success) { 
@@ -248,15 +247,11 @@
             updateStatusBadge('空車');
             Swal.fire({ icon: 'success', title: '行程完成', text: `時間：${res.completedRecord.time}`, timer: 2000, showConfirmButton: false });
         } else if (actionType === 'delete') {
-            // ★★★ 核心修正：刪除成功後，不隱藏卡片，不改動 UI，只負責觸發重整 ★★★
-            // 這裡不呼叫 hideLoading()，讓 Loading 畫面持續到 initSystem 完成
-            // 避免使用者看到畫面閃爍（消失又出現）
+            // ★★★ 核心修正：延長緩衝時間，確保資料寫入後再讀取 ★★★
             showLoading('資料更新中...');
-            
-            // 稍微延遲一下讓 GAS 寫入完成 (保險起見)，然後呼叫 initSystem
             setTimeout(() => {
                 initSystem();
-            }, 500); 
+            }, 1500); // 延長至 1.5 秒
         } else if (actionType === 'manual_insert') {
             Swal.fire('補單成功', '資料已寫入', 'success');
             setTimeout(initSystem, 1000);
@@ -320,7 +315,8 @@
        Swal.fire({ title: '工具箱', showCancelButton: true, showDenyButton: true, confirmButtonText: '補單', denyButtonText: '刪除', cancelButtonText: '取消' }).then(r => { if (r.isConfirmed) openManualInsertModal(); else if (r.isDenied) openManualDeleteModal(); });
     }
     function openManualDeleteModal() {
-        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete_by_seq', { seq: parseInt(r.value) }); }});
+        // ★★★ 修正點：將 action 從 delete_by_seq 改為 delete，讓後端能聽懂 ★★★
+        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete', { seq: parseInt(r.value) }); }});
     }
     function openManualInsertModal() {
         const now = new Date();
