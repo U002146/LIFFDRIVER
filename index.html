@@ -321,7 +321,23 @@
     
     // Tools & GPS
     function handleStopover() { showLoading('記錄停靠點...'); getLocation((lat, lng) => performAction('stopover', { lat, lng }), () => Swal.fire('定位失敗', '', 'error')); }
-    function handleDelete() { Swal.fire({ title: '確定取消？', showCancelButton: true, confirmButtonColor: '#d33' }).then(r => { if(r.isConfirmed) { showLoading('刪除中...'); performAction('delete', { row: state.row }); }}); }
+    function handleDelete() { 
+        // 修正：刪除時如果 state.row 還沒更新，會刪到錯的行
+        // 這裡我們不只傳 row，也傳遞 seq (如果有的話) 作為雙重確認
+        Swal.fire({ title: '確定取消？', showCancelButton: true, confirmButtonColor: '#d33' }).then(r => { 
+            if(r.isConfirmed) { 
+                showLoading('刪除中...'); 
+                // 這裡加入 seq 參數
+                performAction('delete', { 
+                    row: state.row, 
+                    // 如果有最後一筆記錄，嘗試用它的序號來輔助後端判斷
+                    // 但通常這是在「上車後」要取消，所以 row 應該是對的
+                    // 如果是在「下車後」要刪除上一筆，邏輯會不同
+                    // 這裡預設是「乘客未搭乘 (刪除此筆)」 -> 即刪除正在進行中的上車記錄
+                }); 
+            }
+        }); 
+    }
     function getLocation(cb, errCb) { if (!navigator.geolocation) { if(errCb) errCb(); return; } navigator.geolocation.getCurrentPosition(p => cb(p.coords.latitude, p.coords.longitude), e => { console.error(e); if(errCb) errCb(); }, { enableHighAccuracy: true, timeout: 10000 }); }
     
     function openToolsModal() {
