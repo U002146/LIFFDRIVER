@@ -93,7 +93,7 @@
         <a id="sheet-link" href="#" target="_blank" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-table mr-2 text-green-600"></i>開啟報表</a>
         <button onclick="openToolsModal()" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-tools mr-2 text-orange-500"></i>補單 / 刪除</button>
     </div>
-    <div class="mt-8 text-center text-xs text-gray-400">System v23.1 | Mode: GET-API</div>
+    <div class="mt-8 text-center text-xs text-gray-400">System v23.2 | Fix: Auto-Reload on Delete</div>
   </div>
 
   <script>
@@ -107,51 +107,34 @@
 
     // --- 終極修正版 API 呼叫 (全部改用 GET) ---
     async function callApi(action, payload = {}) {
-        // 1. 將所有參數轉為 URLSearchParams
         const params = new URLSearchParams();
         params.append('action', action);
         params.append('driverId', DRIVER_ID);
         
-        // 為了相容 handleRecord 的參數結構，這裡做一個轉換
         if (action === 'handleRecord') {
-             params.append('recordAction', payload.action); // 傳真正的動作 (pickup/dropoff)
-             // 把 payload 其他屬性都加進去
+             params.append('recordAction', payload.action);
              for (const key in payload) {
                  if(key !== 'action') params.append(key, payload[key]);
              }
         } else {
-             // 一般動作直接加
              for (const key in payload) {
                  params.append(key, payload[key]);
              }
         }
-
-        // 2. 加上時間戳防止快取
         params.append('_t', new Date().getTime());
-
-        // 3. 發送 GET 請求
         const url = `${GAS_API_URL}?${params.toString()}`;
         
         try {
             const response = await fetch(url);
             const text = await response.text();
-            try {
-                return JSON.parse(text);
-            } catch (e) {
-                console.error("Non-JSON Response:", text);
-                throw new Error("伺服器回應格式錯誤 (請檢查部署)");
-            }
-        } catch (e) {
-            console.error("Network Error:", e);
-            throw e;
-        }
+            try { return JSON.parse(text); } 
+            catch (e) { console.error("Non-JSON Response:", text); throw new Error("伺服器回應格式錯誤"); }
+        } catch (e) { console.error("Network Error:", e); throw e; }
     }
 
     function initSystem() {
         showLoading('同步資料中...');
-        callApi('getPreviewData')
-            .then(onInitSuccess)
-            .catch(onFailure);
+        callApi('getPreviewData').then(onInitSuccess).catch(onFailure);
     }
 
     function onInitSuccess(response) {
@@ -163,7 +146,14 @@
         state.lastCompletedData = response.lastCompleted;
         state.currentStatus = response.driverStatus || '下班';
         document.getElementById('sheet-link').href = response.spreadsheetUrl;
-        if (response.lastCompleted) updateLastRecordCard(response.lastCompleted);
+        
+        // 確保如果有的話就顯示，沒有就隱藏
+        if (response.lastCompleted) {
+            updateLastRecordCard(response.lastCompleted);
+        } else {
+            document.getElementById('last-record-container').classList.add('hidden');
+        }
+        
         updateStatusBadge(state.currentStatus);
         if (response.lastKnownAddress && response.lastKnownAddress !== '尚未定位') updateAddressDisplay(response.lastKnownAddress);
         
@@ -184,15 +174,14 @@
     function handleCheckIn() {
         showLoading('定位與打卡中...');
         getLocation((lat, lng) => {
-            callApi('driverCheckIn', { lat, lng })
-                .then(res => {
-                    hideLoading();
-                    if(res.success) {
-                        updateAddressDisplay(res.address, true);
-                        updateStatusBadge(res.status);
-                        Swal.fire({ icon: 'success', title: '打卡成功', text: '位置已更新', timer: 1500, showConfirmButton: false });
-                    } else Swal.fire('失敗', res.error, 'error');
-                }).catch(onFailure);
+            callApi('driverCheckIn', { lat, lng }).then(res => {
+                hideLoading();
+                if(res.success) {
+                    updateAddressDisplay(res.address, true);
+                    updateStatusBadge(res.status);
+                    Swal.fire({ icon: 'success', title: '打卡成功', text: '位置已更新', timer: 1500, showConfirmButton: false });
+                } else Swal.fire('失敗', res.error, 'error');
+            }).catch(onFailure);
         }, () => { hideLoading(); Swal.fire('定位失敗', '請檢查 GPS', 'error'); });
     }
 
@@ -200,48 +189,37 @@
         Swal.fire({ title: '確定要休息嗎？', icon: 'question', showCancelButton: true, confirmButtonText: '休息' }).then((result) => {
             if (result.isConfirmed) {
                 showLoading('狀態更新中...');
-                callApi('driverOffDuty')
-                    .then(res => {
-                        hideLoading();
-                        if(res.success) {
-                            updateStatusBadge(res.status);
-                            document.getElementById('address-card').classList.remove('border-green-500');
-                            document.getElementById('address-card').classList.add('border-gray-400');
-                            Swal.fire({ icon: 'success', title: '已切換為下班', timer: 1500, showConfirmButton: false });
-                        } else Swal.fire('失敗', res.error, 'error');
-                    }).catch(onFailure);
+                callApi('driverOffDuty').then(res => {
+                    hideLoading();
+                    if(res.success) {
+                        updateStatusBadge(res.status);
+                        document.getElementById('address-card').classList.remove('border-green-500');
+                        document.getElementById('address-card').classList.add('border-gray-400');
+                        Swal.fire({ icon: 'success', title: '已切換為下班', timer: 1500, showConfirmButton: false });
+                    } else Swal.fire('失敗', res.error, 'error');
+                }).catch(onFailure);
             }
         });
     }
 
     function handlePickup() {
         showLoading('定位中...');
-        getLocation(
-            (lat, lng) => performAction('pickup', { lat, lng }),
-            () => performAction('pickup', { address: 'GPS定位失敗' })
-        );
+        getLocation((lat, lng) => performAction('pickup', { lat, lng }), () => performAction('pickup', { address: 'GPS定位失敗' }));
     }
     
     function handleDropoff(type) {
         Swal.fire({ title: `確認${type}下車？`, showCancelButton: true, confirmButtonText: '確定' }).then((result) => {
             if (result.isConfirmed) {
                 showLoading('結算中...');
-                getLocation(
-                    (lat, lng) => performAction('dropoff', { lat, lng, passengerType: type }),
-                    () => performAction('dropoff', { address: 'GPS定位失敗', passengerType: type })
-                );
+                getLocation((lat, lng) => performAction('dropoff', { lat, lng, passengerType: type }), () => performAction('dropoff', { address: 'GPS定位失敗', passengerType: type }));
             }
         });
     }
 
     function performAction(actionType, data) {
         let targetRow = state.row;
-        // ★★★ 修正點：如果傳入了 seq (刪除歷史)，且沒有指定 row，就強制將 row 設為 null
-        // 這樣後端才會啟用「依 seq 反查行號」的邏輯，而不會被 state.row 蓋掉
         if (data && data.seq) targetRow = null;
         if (data && data.row) targetRow = data.row;
-
-        // 注意：這裡我們傳遞 action 給 wrapper，wrapper 會轉成 recordAction 參數
         const payload = { row: targetRow, action: actionType, ...data };
         callApi('handleRecord', payload).then(res => handleActionSuccess(res, actionType, data)).catch(onFailure);
     }
@@ -268,17 +246,10 @@
         } else if (actionType === 'delete') {
             setDrivingMode(false);
             updateStatusBadge('空車');
-            Swal.fire('已刪除', '行程已取消', 'success');
-            // 因為 delete 改用 API，回傳資料可能簡化，這裡做一個安全檢查
-            if(res.updatedLastRecord) {
-                updateLastRecordCard(res.updatedLastRecord);
-                state.lastCompletedData = res.updatedLastRecord;
-                state.row -= 1;
-            } else {
-                document.getElementById('last-record-container').classList.add('hidden');
-                // 如果刪除後沒有上一筆，可能需要重置 row
-                if(res.deletedRow) state.row = res.deletedRow; 
-            }
+            // ★★★ 核心修改：刪除成功後，自動重整 (initSystem) ★★★
+            // 這樣可以強制從後端抓回正確的 row index 和上一筆 lastRecord
+            Swal.fire({ icon: 'success', title: '已刪除', text: '正在重新同步...', timer: 1000, showConfirmButton: false });
+            setTimeout(() => initSystem(), 1000); 
         } else if (actionType === 'manual_insert') {
             Swal.fire('補單成功', '資料已寫入', 'success');
             setTimeout(initSystem, 1000);
@@ -327,18 +298,11 @@
     // Tools & GPS
     function handleStopover() { showLoading('記錄停靠點...'); getLocation((lat, lng) => performAction('stopover', { lat, lng }), () => Swal.fire('定位失敗', '', 'error')); }
     function handleDelete() { 
-        // 修正：刪除時如果 state.row 還沒更新，會刪到錯的行
-        // 這裡我們不只傳 row，也傳遞 seq (如果有的話) 作為雙重確認
         Swal.fire({ title: '確定取消？', showCancelButton: true, confirmButtonColor: '#d33' }).then(r => { 
             if(r.isConfirmed) { 
                 showLoading('刪除中...'); 
-                // 這裡加入 seq 參數
                 performAction('delete', { 
                     row: state.row, 
-                    // 如果有最後一筆記錄，嘗試用它的序號來輔助後端判斷
-                    // 但通常這是在「上車後」要取消，所以 row 應該是對的
-                    // 如果是在「下車後」要刪除上一筆，邏輯會不同
-                    // 這裡預設是「乘客未搭乘 (刪除此筆)」 -> 即刪除正在進行中的上車記錄
                 }); 
             }
         }); 
@@ -349,7 +313,7 @@
        Swal.fire({ title: '工具箱', showCancelButton: true, showDenyButton: true, confirmButtonText: '補單', denyButtonText: '刪除', cancelButtonText: '取消' }).then(r => { if (r.isConfirmed) openManualInsertModal(); else if (r.isDenied) openManualDeleteModal(); });
     }
     function openManualDeleteModal() {
-        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete', { seq: parseInt(r.value) }); }});
+        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete_by_seq', { seq: parseInt(r.value) }); }});
     }
     function openManualInsertModal() {
         const now = new Date();
