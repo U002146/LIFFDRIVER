@@ -93,49 +93,62 @@
         <a id="sheet-link" href="#" target="_blank" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-table mr-2 text-green-600"></i>開啟報表</a>
         <button onclick="openToolsModal()" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-tools mr-2 text-orange-500"></i>補單 / 刪除</button>
     </div>
-    <div class="mt-8 text-center text-xs text-gray-400">System v22.0 | API Mode: Fetch</div>
+    <div class="mt-8 text-center text-xs text-gray-400">System v23.0 | Mode: GET-API</div>
   </div>
 
   <script>
-    // ★★★ 設定區 ★★★
+    // ★★★ 設定區 (請換成您的 GAS 部署網址) ★★★
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwajwJgO5rOEh0KRRYLlJ8XsFS1_EuZQU4vHydQMNDSA3uA_sL-X8ph44crSZeyRjY/exec"; 
-    
-    // ★★★ 關鍵：這裡目前寫死，未來整合 LIFF 時，改用 liff.getProfile() 取得 ★★★
     const DRIVER_ID = 'U467348846c6b1fa433990d7b75c935b5'; 
 
     let state = { row: 0, isDriving: false, pickupAddress: '', lastCompletedData: null, currentStatus: '下班' };
 
     window.onload = function() { initSystem(); };
 
-// --- API Wrapper (修正版：移除 no-cors，讓錯誤訊息更準確) ---
+    // --- 終極修正版 API 呼叫 (全部改用 GET) ---
     async function callApi(action, payload = {}) {
-        const body = { action: action, driverId: DRIVER_ID, ...payload };
+        // 1. 將所有參數轉為 URLSearchParams
+        const params = new URLSearchParams();
+        params.append('action', action);
+        params.append('driverId', DRIVER_ID);
         
-        // 使用標準 POST，GAS 會自動處理 CORS
-        const response = await fetch(GAS_API_URL, {
-            method: "POST",
-            // 這裡改用 application/x-www-form-urlencoded 或 text/plain 都可以
-            // 關鍵是不要加 mode: 'no-cors'，這樣我們才能讀到真正的錯誤訊息或資料
-            headers: { "Content-Type": "text/plain" }, 
-            body: JSON.stringify(body)
-        });
+        // 為了相容 handleRecord 的參數結構，這裡做一個轉換
+        if (action === 'handleRecord') {
+             params.append('recordAction', payload.action); // 傳真正的動作 (pickup/dropoff)
+             // 把 payload 其他屬性都加進去
+             for (const key in payload) {
+                 if(key !== 'action') params.append(key, payload[key]);
+             }
+        } else {
+             // 一般動作直接加
+             for (const key in payload) {
+                 params.append(key, payload[key]);
+             }
+        }
 
-        // 這裡會檢查回傳是否真的是 JSON
-        const text = await response.text(); 
+        // 2. 加上時間戳防止快取
+        params.append('_t', new Date().getTime());
+
+        // 3. 發送 GET 請求
+        const url = `${GAS_API_URL}?${params.toString()}`;
+        
         try {
-            return JSON.parse(text);
+            const response = await fetch(url);
+            const text = await response.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                console.error("Non-JSON Response:", text);
+                throw new Error("伺服器回應格式錯誤 (請檢查部署)");
+            }
         } catch (e) {
-            console.error("Server returned non-JSON:", text);
-            throw new Error("伺服器回應格式錯誤 (可能版本未更新)");
+            console.error("Network Error:", e);
+            throw e;
         }
     }
 
     function initSystem() {
         showLoading('同步資料中...');
-        // 為了避免 POST CORS 的複雜性，初始化我們可以用 GET (如果後端支援 doGet 回傳 JSON)
-        // 這裡我們示範用 POST (請確保後端 doGet/doPost 都有部署)
-        
-        // 簡單起見，我們統一用 POST
         callApi('getPreviewData')
             .then(onInitSuccess)
             .catch(onFailure);
@@ -223,6 +236,7 @@
 
     function performAction(actionType, data) {
         let targetRow = (data && data.row) ? data.row : state.row;
+        // 注意：這裡我們傳遞 action 給 wrapper，wrapper 會轉成 recordAction 參數
         const payload = { row: targetRow, action: actionType, ...data };
         callApi('handleRecord', payload).then(res => handleActionSuccess(res, actionType, data)).catch(onFailure);
     }
@@ -250,13 +264,15 @@
             setDrivingMode(false);
             updateStatusBadge('空車');
             Swal.fire('已刪除', '行程已取消', 'success');
+            // 因為 delete 改用 API，回傳資料可能簡化，這裡做一個安全檢查
             if(res.updatedLastRecord) {
                 updateLastRecordCard(res.updatedLastRecord);
                 state.lastCompletedData = res.updatedLastRecord;
                 state.row -= 1;
             } else {
                 document.getElementById('last-record-container').classList.add('hidden');
-                state.row = 4;
+                // 如果刪除後沒有上一筆，可能需要重置 row
+                if(res.deletedRow) state.row = res.deletedRow; 
             }
         } else if (actionType === 'manual_insert') {
             Swal.fire('補單成功', '資料已寫入', 'success');
@@ -325,4 +341,3 @@
   </script>
 </body>
 </html>
-
