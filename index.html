@@ -107,25 +107,26 @@
 
     window.onload = function() { initSystem(); };
 
-    // --- API Wrapper (核心：用 fetch 取代 google.script.run) ---
+// --- API Wrapper (修正版：移除 no-cors，讓錯誤訊息更準確) ---
     async function callApi(action, payload = {}) {
-        // 合併 action 與 driverId 到 payload
         const body = { action: action, driverId: DRIVER_ID, ...payload };
         
+        // 使用標準 POST，GAS 會自動處理 CORS
+        const response = await fetch(GAS_API_URL, {
+            method: "POST",
+            // 這裡改用 application/x-www-form-urlencoded 或 text/plain 都可以
+            // 關鍵是不要加 mode: 'no-cors'，這樣我們才能讀到真正的錯誤訊息或資料
+            headers: { "Content-Type": "text/plain" }, 
+            body: JSON.stringify(body)
+        });
+
+        // 這裡會檢查回傳是否真的是 JSON
+        const text = await response.text(); 
         try {
-            const response = await fetch(GAS_API_URL, {
-                method: "POST",
-                mode: "no-cors", // 注意：GAS POST 會有 CORS 問題，通常用 no-cors 或 redirect
-                // 但 GAS 的 doPost 回傳 JSON 在瀏覽器直接 fetch 會遇到 CORS 阻擋
-                // 最佳解法是利用 text/plain hack，或者後端設定正確 CORS header
-                // 這裡我們採用最通用的 "text/plain" 發送，後端用 e.postData.contents 解析
-                headers: { "Content-Type": "text/plain" }, 
-                body: JSON.stringify(body)
-            });
-            return await response.json();
+            return JSON.parse(text);
         } catch (e) {
-            console.error("API Call Error:", e);
-            throw e;
+            console.error("Server returned non-JSON:", text);
+            throw new Error("伺服器回應格式錯誤 (可能版本未更新)");
         }
     }
 
@@ -324,3 +325,4 @@
   </script>
 </body>
 </html>
+
