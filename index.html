@@ -93,7 +93,7 @@
         <a id="sheet-link" href="#" target="_blank" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-table mr-2 text-green-600"></i>開啟報表</a>
         <button onclick="openToolsModal()" class="bg-white border border-gray-300 text-gray-700 py-3 rounded-lg text-center shadow-sm font-medium text-sm flex items-center justify-center"><i class="fas fa-tools mr-2 text-orange-500"></i>補單 / 刪除</button>
     </div>
-    <div class="mt-8 text-center text-xs text-gray-400">System v23.0 | Mode: GET-API</div>
+    <div class="mt-8 text-center text-xs text-gray-400">System v23.1 | Mode: GET-API</div>
   </div>
 
   <script>
@@ -235,7 +235,12 @@
     }
 
     function performAction(actionType, data) {
-        let targetRow = (data && data.row) ? data.row : state.row;
+        let targetRow = state.row;
+        // ★★★ 修正點：如果傳入了 seq (刪除歷史)，且沒有指定 row，就強制將 row 設為 null
+        // 這樣後端才會啟用「依 seq 反查行號」的邏輯，而不會被 state.row 蓋掉
+        if (data && data.seq) targetRow = null;
+        if (data && data.row) targetRow = data.row;
+
         // 注意：這裡我們傳遞 action 給 wrapper，wrapper 會轉成 recordAction 參數
         const payload = { row: targetRow, action: actionType, ...data };
         callApi('handleRecord', payload).then(res => handleActionSuccess(res, actionType, data)).catch(onFailure);
@@ -344,7 +349,7 @@
        Swal.fire({ title: '工具箱', showCancelButton: true, showDenyButton: true, confirmButtonText: '補單', denyButtonText: '刪除', cancelButtonText: '取消' }).then(r => { if (r.isConfirmed) openManualInsertModal(); else if (r.isDenied) openManualDeleteModal(); });
     }
     function openManualDeleteModal() {
-        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete_by_seq', { seq: parseInt(r.value) }); }});
+        Swal.fire({ title: '刪除資料', input: 'number', inputValue: state.lastCompletedData?.seq, showCancelButton: true }).then(r => { if(r.value) { showLoading('刪除中...'); performAction('delete', { seq: parseInt(r.value) }); }});
     }
     function openManualInsertModal() {
         const now = new Date();
